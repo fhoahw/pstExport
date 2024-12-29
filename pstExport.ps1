@@ -1,5 +1,5 @@
 # Basis-Pfad fuer den Export definieren
-$BaseExportPath = "C:\Users\felix.hoevel\OneDrive\Dokumente\PSTExport"
+$BaseExportPath = ""
 
 # Stellen Sie sicher, dass die Konsole UTF-8 verwendet
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
