@@ -1,5 +1,6 @@
-# Basis-Pfad fuer den Export definieren
-$BaseExportPath = ""
+# Basis-Pfade definieren
+$LocalTempPath = "${env:Temp}\PSTExport"
+$NetworkPath = "\\Netzwerkpfad\Backup"
 
 # Stellen Sie sicher, dass die Konsole UTF-8 verwendet
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -14,16 +15,15 @@ function Import-OutlookModule {
     }
 }
 
-# Funktion zum Erstellen und Hinzufuegen einer PST-Datei
+# Funktion zum Erstellen und Hinzufügen einer PST-Datei
 function Create-AddPST {
     param (
         [string]$PstFilePath,
-        [string]$PstDisplayName = "TestPST"
+        [string]$PstDisplayName
     )
 
     Import-OutlookModule
 
-    # Outlook-Anwendung und Namespace erstellen
     try {
         $Outlook = New-Object -ComObject Outlook.Application
         $Namespace = $Outlook.GetNamespace("MAPI")
@@ -31,23 +31,20 @@ function Create-AddPST {
         throw
     }
 
-    # Existenz der PST-Datei ueberpruefen und ggf. entfernen
     if (Test-Path $PstFilePath) {
         Remove-Item -Path $PstFilePath -Force
     }
 
-    # PST-Datei erstellen und hinzufuegen
     try {
-        $Namespace.AddStoreEx($PstFilePath, 3) # 3 = olStoreUnicode
+        $Namespace.AddStoreEx($PstFilePath, 3)
         $PstStore = $Namespace.Folders.Item($Namespace.Folders.Count)
         $PstStore.Name = $PstDisplayName
-        Write-Host "PST-Datei '$PstFilePath' erstellt und hinzugefuegt."
+        Write-Host "PST-Datei '$PstFilePath' erstellt."
     } catch {
-        Write-Host "Fehler beim Erstellen oder Hinzufuegen der PST-Datei: $($_.Exception.Message)"
+        Write-Host "Fehler beim Erstellen der PST-Datei: $($_.Exception.Message)"
         throw
     }
 
-    # COM-Objekte freigeben
     [System.Runtime.Interopservices.Marshal]::ReleaseComObject($PstStore) | Out-Null
     [System.Runtime.Interopservices.Marshal]::ReleaseComObject($Namespace) | Out-Null
     [System.Runtime.Interopservices.Marshal]::ReleaseComObject($Outlook) | Out-Null
@@ -55,42 +52,47 @@ function Create-AddPST {
     [GC]::WaitForPendingFinalizers()
 }
 
-# Funktion zum Exportieren aller PST-Dateien
+# Funktion zum Exportieren ausgewählter PST-Dateien
 function Export-PST {
     param (
-        [string]$BaseExportPath
+        [string]$LocalTempPath
     )
 
     Import-OutlookModule
 
-    # Outlook-Anwendung und Namespace erstellen
     try {
         $Outlook = New-Object -ComObject Outlook.Application
         $Namespace = $Outlook.GetNamespace("MAPI")
-        Write-Host "Outlook-Anwendung gestartet."
     } catch {
         Write-Host "Fehler beim Starten der Outlook-Anwendung: $($_.Exception.Message)"
         exit
     }
 
-    # Alle Konten abrufen
     $Accounts = $Namespace.Folders
-    $TotalAccounts = $Accounts.Count
-    $ProgressCount = 0
-
-    Write-Host "Starte den Export von $TotalAccounts Konten."
+    $SelectedAccounts = @()
+    Write-Host "Verfügbare Konten:"
+    $Index = 1
 
     foreach ($Account in $Accounts) {
-        $ProgressCount++
+        Write-Host ("{0}: {1}" -f $Index, $Account.Name)
+        $Index++
+    }
+
+    $Selection = Read-Host "Geben Sie die Nummer(n) der zu sichernden Konten ein (z. B. 1,3)"
+    $Indices = $Selection -split ',' | ForEach-Object { $_.Trim() -as [int] }
+
+    foreach ($Index in $Indices) {
+        if ($Index -le $Accounts.Count -and $Index -gt 0) {
+            $SelectedAccounts += $Accounts.Item($Index)
+        }
+    }
+
+    foreach ($Account in $SelectedAccounts) {
         $AccountName = $Account.Name -replace '\.', '_'
-        $AccountFolder = Join-Path -Path $BaseExportPath -ChildPath $AccountName
-        New-Item -ItemType Directory -Path $AccountFolder -Force | Out-Null
+        $PstFile = Join-Path -Path $LocalTempPath -ChildPath "$AccountName.pst"
 
-        $PstFile = Join-Path -Path $AccountFolder -ChildPath "$AccountName.pst"
-
-        $ExportSuccess = $true
         try {
-            Write-Host "Exportiere Konto: $AccountName ($ProgressCount von $TotalAccounts)"
+            Write-Host "Exportiere Konto: $AccountName"
             Create-AddPST -PstFilePath $PstFile -PstDisplayName $AccountName
 
             $TotalFolders = $Account.Folders.Count
@@ -101,60 +103,121 @@ function Export-PST {
                 $null = $Folder.CopyTo($NewFolder)
                 [System.Runtime.Interopservices.Marshal]::ReleaseComObject($Folder) | Out-Null
                 [System.Runtime.Interopservices.Marshal]::ReleaseComObject($NewFolder) | Out-Null
-                $RemainingFolders = $TotalFolders - $FolderCount
-                Write-Progress -Activity "Exporting PST files" -Status "Processing $AccountName ($FolderCount/$TotalFolders - $RemainingFolders remaining)" -PercentComplete (($FolderCount / $TotalFolders) * 100)
             }
 
             $Namespace.RemoveStore($Namespace.Folders.Item($Namespace.Folders.Count))
             Write-Host "Export von $AccountName abgeschlossen."
         } catch {
-            $ExportSuccess = $false
-            Write-Host "Fehler beim Exportieren von $AccountName/: $($_.Exception.Message)"
+            Write-Host ("Fehler beim Exportieren von {0}: {1}" -f $AccountName, $_.Exception.Message)
         }
-
-        Write-Progress -Activity "Exporting PST files" -Status "Completed $AccountName" -PercentComplete 100
     }
 
-    # COM-Objekte freigeben
     [System.Runtime.Interopservices.Marshal]::ReleaseComObject($Accounts) | Out-Null
     [System.Runtime.Interopservices.Marshal]::ReleaseComObject($Namespace) | Out-Null
     [System.Runtime.Interopservices.Marshal]::ReleaseComObject($Outlook) | Out-Null
     [GC]::Collect()
     [GC]::WaitForPendingFinalizers()
 
-    # Outlook-Prozess beenden
     Stop-Process -Name "OUTLOOK" -Force
     Write-Host "Outlook-Prozess beendet."
-
-    Write-Host "Alle Konten wurden erfolgreich exportiert."
 }
 
-# Begruessungsbildschirm anzeigen
-function Show-WelcomeScreen {
-    Write-Host "****************************************" -ForegroundColor Green
-    Write-Host "*                                      *" -ForegroundColor Green
-    Write-Host "*    Willkommen zum PST Export Tool    *" -ForegroundColor Green
-    Write-Host "*                                      *" -ForegroundColor Green
-    Write-Host "****************************************" -ForegroundColor Green
-    Write-Host ""
-    Write-Host "Dieses Tool exportiert alle Ihre Outlook-Konten in PST-Dateien."
-    Write-Host "Bitte stellen Sie sicher, dass Outlook geschlossen ist, bevor Sie fortfahren."
-    Write-Host ""
-    Write-Host "Druecken Sie [Enter], um den Export zu starten..."
-    Read-Host
+# Funktion zum Kopieren der Dateien auf das Netzlaufwerk
+function Copy-ToNetwork {
+    param (
+        [string]$LocalPath,
+        [string]$NetworkPath
+    )
+
+    # Überprüfen, ob der Netzwerkpfad erreichbar ist
+    try {
+        if (-not (Test-Path -Path $NetworkPath)) {
+            Write-Host "Netzwerkpfad '$NetworkPath' ist nicht erreichbar oder existiert nicht." -ForegroundColor Red
+            return
+        }
+
+        # Testen, ob der Netzwerkpfad schreibbar ist
+        $TestFile = Join-Path -Path $NetworkPath -ChildPath "testfile.tmp"
+        New-Item -Path $TestFile -ItemType File -Force | Out-Null
+        Remove-Item -Path $TestFile -Force | Out-Null
+        Write-Host "Netzwerkpfad '$NetworkPath' ist erreichbar und schreibbar." -ForegroundColor Green
+    } catch {
+        Write-Host "Fehler beim Testen des Netzwerkpfads '$NetworkPath': $($_.Exception.Message)" -ForegroundColor Red
+        return
+    }
+
+    # Dateien kopieren mit Fortschrittsanzeige
+    try {
+        $Files = Get-ChildItem -Path $LocalPath -Recurse
+        $TotalFiles = $Files.Count
+        $FileCount = 0
+
+        foreach ($File in $Files) {
+            $FileCount++
+            $SourceFilePath = $File.FullName
+            $DestinationFilePath = Join-Path -Path $NetworkPath -ChildPath $File.FullName.Substring($LocalPath.Length)
+
+            # Zielverzeichnis erstellen, falls nicht vorhanden
+            $DestinationFolder = Split-Path -Path $DestinationFilePath
+            if (-not (Test-Path -Path $DestinationFolder)) {
+                New-Item -ItemType Directory -Path $DestinationFolder -Force | Out-Null
+            }
+
+            # Datei kopieren
+            Copy-Item -Path $SourceFilePath -Destination $DestinationFilePath -Force
+
+            # Fortschritt anzeigen
+            $PercentComplete = [math]::Round(($FileCount / $TotalFiles) * 100, 2)
+            Write-Progress -Activity "Kopiere Dateien nach Netzwerkpfad" `
+                            -Status "Kopiere Datei $FileCount von $TotalFiles" `
+                            -PercentComplete $PercentComplete
+        }
+
+        Write-Host "Alle Dateien wurden erfolgreich von '$LocalPath' nach '$NetworkPath' kopiert." -ForegroundColor Green
+    } catch {
+        Write-Host "Fehler beim Kopieren von Dateien: $($_.Exception.Message)" -ForegroundColor Red
+    }
+}
+
+
+
+# Funktion zum Bereinigen der lokalen Dateien
+function Cleanup-TempFiles {
+    param (
+        [string]$LocalTempPath
+    )
+
+    if (Test-Path $LocalTempPath) {
+        Remove-Item -Path $LocalTempPath -Recurse -Force
+        Write-Host "Temporäre Dateien wurden gelöscht."
+    }
 }
 
 # Hauptfunktion
 function Main {
-    # Begruessungsbildschirm anzeigen
-    Show-WelcomeScreen
+    # Begrüßungsbildschirm
+    Write-Host "****************************************" -ForegroundColor Green
+    Write-Host "*                                      *"
+    Write-Host "*    Willkommen zum PST Export Tool    *"
+    Write-Host "*                                      *"
+    Write-Host "****************************************" -ForegroundColor Green
 
-    # Basisverzeichnis erstellen, wenn es nicht existiert
-    New-Item -ItemType Directory -Path $BaseExportPath -Force | Out-Null
+    # Lokales Temp-Verzeichnis erstellen
+    if (-Not (Test-Path $LocalTempPath)) {
+        New-Item -ItemType Directory -Path $LocalTempPath -Force | Out-Null
+    }
 
     # PST-Export starten
-    Export-PST -BaseExportPath $BaseExportPath
+    Export-PST -LocalTempPath $LocalTempPath
+
+    # Dateien auf Netzlaufwerk kopieren
+    Copy-ToNetwork -LocalTempPath $LocalTempPath -NetworkPath $NetworkPath
+
+    # Lokale Dateien bereinigen
+    Cleanup-TempFiles -LocalTempPath $LocalTempPath
+
+    Write-Host "Export abgeschlossen."
 }
 
-# Hauptfunktion aufrufen
+# Start der Hauptfunktion
 Main
