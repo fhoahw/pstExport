@@ -2,6 +2,8 @@
 $LocalTempPath = "${env:Temp}\PSTExport"
 $NetworkPath = "\\Netzwerkpfad\Backup"
 
+$NetPathAvailable = 0
+
 # Stellen Sie sicher, dass die Konsole UTF-8 verwendet
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
@@ -129,23 +131,6 @@ function Copy-ToNetwork {
         [string]$NetworkPath
     )
 
-    # Überprüfen, ob der Netzwerkpfad erreichbar ist
-    try {
-        if (-not (Test-Path -Path $NetworkPath)) {
-            Write-Host "Netzwerkpfad '$NetworkPath' ist nicht erreichbar oder existiert nicht." -ForegroundColor Red
-            return
-        }
-
-        # Testen, ob der Netzwerkpfad schreibbar ist
-        $TestFile = Join-Path -Path $NetworkPath -ChildPath "testfile.tmp"
-        New-Item -Path $TestFile -ItemType File -Force | Out-Null
-        Remove-Item -Path $TestFile -Force | Out-Null
-        Write-Host "Netzwerkpfad '$NetworkPath' ist erreichbar und schreibbar." -ForegroundColor Green
-    } catch {
-        Write-Host "Fehler beim Testen des Netzwerkpfads '$NetworkPath': $($_.Exception.Message)" -ForegroundColor Red
-        return
-    }
-
     # Dateien kopieren mit Fortschrittsanzeige
     try {
         $Files = Get-ChildItem -Path $LocalPath -Recurse
@@ -179,6 +164,26 @@ function Copy-ToNetwork {
     }
 }
 
+function checkNetPath{
+    # Überprüfen, ob der Netzwerkpfad erreichbar ist
+    try {
+        if (-not (Test-Path -Path $NetworkPath)) {
+            Write-Host "Netzwerkpfad '$NetworkPath' ist nicht erreichbar oder existiert nicht." -ForegroundColor Red
+            exit
+        }
+
+        # Testen, ob der Netzwerkpfad schreibbar ist
+        $TestFile = Join-Path -Path $NetworkPath -ChildPath "testfile.tmp"
+        New-Item -Path $TestFile -ItemType File -Force | Out-Null
+        Remove-Item -Path $TestFile -Force | Out-Null
+        Write-Host "Netzwerkpfad '$NetworkPath' ist erreichbar und schreibbar." -ForegroundColor Green
+        $NetPathAvailable = 1
+    } catch {
+        Write-Host "Fehler beim Testen des Netzwerkpfads '$NetworkPath': $($_.Exception.Message)" -ForegroundColor Red
+        exit
+    }
+}
+
 
 
 # Funktion zum Bereinigen der lokalen Dateien
@@ -201,6 +206,8 @@ function Main {
     Write-Host "*    Willkommen zum PST Export Tool    *"
     Write-Host "*                                      *"
     Write-Host "****************************************" -ForegroundColor Green
+
+    checkNetPath
 
     # Lokales Temp-Verzeichnis erstellen
     if (-Not (Test-Path $LocalTempPath)) {
