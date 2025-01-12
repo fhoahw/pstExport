@@ -2,7 +2,7 @@
 $Config = @{
     LocalTempPath    = "${env:Temp}\PSTExport"  # Pfad für temporäre Dateien
     NetworkPath      = "\\vault\Share\test"  # Pfad für Netzlaufwerk
-    ExportToNetwork  = $true                      # Soll der Export auf ein Netzlaufwerk erfolgen?
+    ExportToNetwork  = $false                      # Soll der Export auf ein Netzlaufwerk erfolgen?
     CleanupTempFiles = $true                      # Soll das Temp-Verzeichnis nach dem Export bereinigt werden?
     UseLocalPath     = $true                     # Soll ein lokaler, dauerhafter Pfad genutzt werden?
     LocalExportPath  = "C:\temp"       # Pfad für lokale Backups (nicht Temp)
